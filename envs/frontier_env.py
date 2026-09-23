@@ -2,8 +2,8 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import cv2
-from rl_sim.core.map_generator import generate_random_grid
-from rl_sim.core.raycaster import compute_fov
+from core.map_generator import generate_random_grid
+from core.raycaster import compute_fov
 
 MAX_FRONTIERS = 20
 GRID_SIZE = 64

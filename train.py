@@ -3,12 +3,12 @@ import sys
 import numpy as np
 
 # Add root project dir to python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
-from rl_sim.envs.frontier_env import MultiRobotFrontierEnv
+from envs.frontier_env import MultiRobotFrontierEnv
 
 class CustomTensorboardCallback(BaseCallback):
     """

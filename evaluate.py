@@ -5,10 +5,10 @@ import cv2
 import numpy as np
 
 # Add root project dir to python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from stable_baselines3 import PPO
-from rl_sim.envs.frontier_env import MultiRobotFrontierEnv
+from envs.frontier_env import MultiRobotFrontierEnv
 
 def render_env(obs):
     """Visualizes the grid map and robots."""
