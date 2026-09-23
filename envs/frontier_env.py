@@ -98,7 +98,7 @@ class MultiRobotFrontierEnv(gym.Env):
         valid_frontiers = obs['frontiers']
         num_valid = obs['num_valid_frontiers'][0]
         
-        reward = -0.1 # Step penalty
+        reward = -0.5 # Step penalty
         
         # Move robots towards selected frontiers
         for i in range(2):
@@ -112,18 +112,28 @@ class MultiRobotFrontierEnv(gym.Env):
                 dist = np.hypot(dx, dy)
                 
                 if dist > 0:
-                    step_x = int(round(self.poses[i][0] + (dx / dist)))
-                    step_y = int(round(self.poses[i][1] + (dy / dist)))
+                    dx_norm = dx / dist
+                    dy_norm = dy / dist
                     
-                    # Collision check with walls
+                    step_x = int(round(self.poses[i][0] + dx_norm))
+                    step_y = int(round(self.poses[i][1] + dy_norm))
+                    
+                    # Collision check with walls and sliding
                     if self.ground_truth[step_y, step_x] == 0:
                         self.poses[i][0] = step_x
                         self.poses[i][1] = step_y
+                    else:
+                        # Try sliding on X axis
+                        if self.ground_truth[self.poses[i][1], step_x] == 0 and abs(dx_norm) > 0.1:
+                            self.poses[i][0] = step_x
+                        # Try sliding on Y axis
+                        elif self.ground_truth[step_y, self.poses[i][0]] == 0 and abs(dy_norm) > 0.1:
+                            self.poses[i][1] = step_y
         
         collision_count = 0
         # Inter-robot collision penalty
         if np.hypot(self.poses[0][0] - self.poses[1][0], self.poses[0][1] - self.poses[1][1]) < 2.0:
-            reward -= 5.0
+            reward -= 20.0
             collision_count = 1
             
         # Raycast again

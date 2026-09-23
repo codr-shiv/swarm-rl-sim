@@ -65,7 +65,7 @@ if __name__ == "__main__":
     )
     
     # Train the agent
-    total_timesteps = 1000000
+    total_timesteps = 10000000
     print(f"Starting training for {total_timesteps} timesteps...")
     
     custom_callback = CustomTensorboardCallback()

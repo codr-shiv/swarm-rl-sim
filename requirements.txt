@@ -3,3 +3,4 @@ stable-baselines3==2.2.1
 numpy
 opencv-python
 torch
+tensorboard
