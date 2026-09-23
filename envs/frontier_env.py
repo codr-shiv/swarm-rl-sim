@@ -25,7 +25,7 @@ class MultiRobotFrontierEnv(gym.Env):
         
         # Observation Space
         self.observation_space = spaces.Dict({
-            'global_map': spaces.Box(low=-1, high=100, shape=(GRID_SIZE, GRID_SIZE), dtype=np.int8),
+            'global_map': spaces.Box(low=0, high=255, shape=(1, GRID_SIZE, GRID_SIZE), dtype=np.uint8),
             'robot_poses': spaces.Box(low=0, high=GRID_SIZE-1, shape=(2, 2), dtype=np.int32),
             'frontiers': spaces.Box(low=0, high=GRID_SIZE-1, shape=(MAX_FRONTIERS, 2), dtype=np.int32),
             'num_valid_frontiers': spaces.Box(low=0, high=MAX_FRONTIERS, shape=(1,), dtype=np.int32)
@@ -84,8 +84,14 @@ class MultiRobotFrontierEnv(gym.Env):
         if num_valid > 0:
             padded_frontiers[:num_valid] = raw_frontiers[:num_valid]
             
+        # Convert for CNN (0-255 uint8, shape: 1xHxW)
+        cnn_map = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.uint8)
+        cnn_map[self.belief_map == -1] = 0    # Unknown is black
+        cnn_map[self.belief_map == 0] = 127   # Free is gray
+        cnn_map[self.belief_map >= 50] = 255  # Obstacle is white
+        
         return {
-            'global_map': self.belief_map.copy(),
+            'global_map': np.expand_dims(cnn_map, axis=0),
             'robot_poses': self.poses.copy(),
             'frontiers': padded_frontiers,
             'num_valid_frontiers': np.array([num_valid], dtype=np.int32)

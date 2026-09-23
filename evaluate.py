@@ -12,15 +12,15 @@ from envs.frontier_env import MultiRobotFrontierEnv
 
 def render_env(obs):
     """Visualizes the grid map and robots."""
-    grid = obs['global_map']
+    grid = obs['global_map'][0]
     h, w = grid.shape
     
     img = np.zeros((h, w, 3), dtype=np.uint8)
     
     # Draw Map
-    img[grid == -1] = [100, 100, 100]  # Gray for unknown
-    img[grid == 0] = [255, 255, 255]   # White for free
-    img[grid == 100] = [0, 0, 0]         # Black for obstacle
+    img[grid == 0] = [100, 100, 100]     # Gray for unknown
+    img[grid == 127] = [255, 255, 255]   # White for free
+    img[grid == 255] = [0, 0, 0]         # Black for obstacle
     
     # Draw Frontiers
     frontiers = obs['frontiers']
