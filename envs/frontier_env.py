@@ -6,8 +6,8 @@ from core.map_generator import generate_random_grid
 from core.raycaster import compute_fov
 
 MAX_FRONTIERS = 20
-GRID_SIZE = 64
-MAX_STEPS = 500
+GRID_SIZE = 160
+MAX_STEPS = 1000
 
 class MultiRobotFrontierEnv(gym.Env):
     """
@@ -25,7 +25,7 @@ class MultiRobotFrontierEnv(gym.Env):
         
         # Observation Space
         self.observation_space = spaces.Dict({
-            'global_map': spaces.Box(low=0, high=255, shape=(1, GRID_SIZE, GRID_SIZE), dtype=np.uint8),
+            'global_map': spaces.Box(low=0, high=255, shape=(3, GRID_SIZE, GRID_SIZE), dtype=np.uint8),
             'robot_poses': spaces.Box(low=0, high=GRID_SIZE-1, shape=(2, 2), dtype=np.int32),
             'frontiers': spaces.Box(low=0, high=GRID_SIZE-1, shape=(MAX_FRONTIERS, 2), dtype=np.int32),
             'num_valid_frontiers': spaces.Box(low=0, high=MAX_FRONTIERS, shape=(1,), dtype=np.int32)
@@ -36,8 +36,8 @@ class MultiRobotFrontierEnv(gym.Env):
         free_mask = np.where(self.belief_map == 0, 255, 0).astype(np.uint8)
         obstacle_mask = np.where(self.belief_map >= 50, 255, 0).astype(np.uint8)
         
-        # Inflate obstacles (1 pixel is approx 0.15m in a scaled grid)
-        obs_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        # Inflate obstacles (to match exactly 7x7 kernel in frontier_coordinator.py)
+        obs_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         dilated_obstacles = cv2.dilate(obstacle_mask, obs_kernel, iterations=1)
         safe_free_mask = cv2.bitwise_and(free_mask, cv2.bitwise_not(dilated_obstacles))
         
@@ -49,7 +49,7 @@ class MultiRobotFrontierEnv(gym.Env):
         
         frontiers = []
         for i in range(1, num_labels):
-            if stats[i, cv2.CC_STAT_AREA] > 2: # Ignore tiny noise
+            if stats[i, cv2.CC_STAT_AREA] > 5: # Match exactly 5 from frontier_coordinator.py
                 cx, cy = int(centroids[i][0]), int(centroids[i][1])
                 frontiers.append([cx, cy])
                 
@@ -60,6 +60,12 @@ class MultiRobotFrontierEnv(gym.Env):
         
         # 1. Generate new ground truth map
         self.ground_truth, spawns = generate_random_grid(size=GRID_SIZE)
+        
+        # 1b. Generate Costmap (Inflate obstacles for robot collision)
+        # Turtlebot3 radius is ~0.105m. At 0.05m/pixel, we inflate by ~2 pixels.
+        # This prevents the point-robot from hugging walls or squeezing through gaps Nav2 would reject.
+        obs_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        self.collision_map = cv2.dilate(self.ground_truth, obs_kernel, iterations=1)
         
         # 2. Initialize Belief Map (all unknown)
         self.belief_map = np.full((GRID_SIZE, GRID_SIZE), -1, dtype=np.int8)
@@ -73,6 +79,7 @@ class MultiRobotFrontierEnv(gym.Env):
         
         self.current_step = 0
         self.explored_cells = np.sum(self.belief_map != -1)
+        self.total_free_cells = max(1, np.sum(self.ground_truth == 0))
         
         return self._get_obs(), {}
 
@@ -84,14 +91,24 @@ class MultiRobotFrontierEnv(gym.Env):
         if num_valid > 0:
             padded_frontiers[:num_valid] = raw_frontiers[:num_valid]
             
-        # Convert for CNN (0-255 uint8, shape: 1xHxW)
-        cnn_map = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.uint8)
-        cnn_map[self.belief_map == -1] = 0    # Unknown is black
-        cnn_map[self.belief_map == 0] = 127   # Free is gray
-        cnn_map[self.belief_map >= 50] = 255  # Obstacle is white
+        # Convert for CNN (0-255 uint8, shape: 3xHxW)
+        cnn_map = np.zeros((3, GRID_SIZE, GRID_SIZE), dtype=np.uint8)
+        # Channel 0: Occupancy
+        cnn_map[0, self.belief_map == -1] = 0    # Unknown is black
+        cnn_map[0, self.belief_map == 0] = 127   # Free is gray
+        cnn_map[0, self.belief_map >= 50] = 255  # Obstacle is white
+        
+        # Channel 1: Robot Poses
+        cnn_map[1, self.poses[0][1], self.poses[0][0]] = 255
+        cnn_map[1, self.poses[1][1], self.poses[1][0]] = 255
+        
+        # Channel 2: Frontiers
+        for i in range(num_valid):
+            fx, fy = padded_frontiers[i]
+            cnn_map[2, fy, fx] = 255
         
         return {
-            'global_map': np.expand_dims(cnn_map, axis=0),
+            'global_map': cnn_map,
             'robot_poses': self.poses.copy(),
             'frontiers': padded_frontiers,
             'num_valid_frontiers': np.array([num_valid], dtype=np.int32)
@@ -124,17 +141,20 @@ class MultiRobotFrontierEnv(gym.Env):
                     step_x = int(round(self.poses[i][0] + dx_norm))
                     step_y = int(round(self.poses[i][1] + dy_norm))
                     
-                    # Collision check with walls and sliding
-                    if self.ground_truth[step_y, step_x] == 0:
+                    # Collision check with walls and sliding (using inflated costmap)
+                    if self.collision_map[step_y, step_x] == 0:
                         self.poses[i][0] = step_x
                         self.poses[i][1] = step_y
                     else:
                         # Try sliding on X axis
-                        if self.ground_truth[self.poses[i][1], step_x] == 0 and abs(dx_norm) > 0.1:
+                        if self.collision_map[self.poses[i][1], step_x] == 0 and abs(dx_norm) > 0.1:
                             self.poses[i][0] = step_x
                         # Try sliding on Y axis
-                        elif self.ground_truth[step_y, self.poses[i][0]] == 0 and abs(dy_norm) > 0.1:
+                        elif self.collision_map[step_y, self.poses[i][0]] == 0 and abs(dy_norm) > 0.1:
                             self.poses[i][1] = step_y
+            else:
+                # Penalty for picking a frontier index that doesn't exist
+                reward -= 1.0
         
         collision_count = 0
         # Inter-robot collision penalty
@@ -147,14 +167,15 @@ class MultiRobotFrontierEnv(gym.Env):
         compute_fov(self.belief_map, self.ground_truth, self.poses[1][0], self.poses[1][1])
         
         new_explored = np.sum(self.belief_map != -1)
-        reward += (new_explored - self.explored_cells) * 1.0 # Reward for discovering new space
+        # Scale discovery reward so exploring 100% of the free space yields exactly +100.0 reward
+        reward += ((new_explored - self.explored_cells) / self.total_free_cells) * 100.0
         self.explored_cells = new_explored
         
         # Check Done
         done = False
-        if new_explored >= np.sum(self.ground_truth == 0) * 0.95: # 95% explored
+        if new_explored >= self.total_free_cells * 0.95: # 95% explored
             done = True
-            reward += 100.0 # Completion bonus
+            reward += 50.0 # Completion bonus
             
         if self.current_step >= MAX_STEPS:
             done = True

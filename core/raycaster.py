@@ -31,7 +31,7 @@ def bresenham_line(x0, y0, x1, y1):
     points.append((x, y))
     return points
 
-def compute_fov(robot_map, ground_truth, rx, ry, max_range=20):
+def compute_fov(robot_map, ground_truth, rx, ry, max_range=70):
     """
     Simulates a 360 LiDAR scan and updates the robot's belief map.
     robot_map: -1 = unknown, 0 = free, 1 = obstacle
